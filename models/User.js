@@ -6,10 +6,10 @@ const bcrypt = require('bcryptjs');
 const userSchema = new mongoose.Schema({
   // Basic Information
   firstName: { type: String, required: true, trim: true },
-  lastName: { type: String, required: true, trim: true },
+  lastName: { type: String, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true },
-  phone: { type: String, required: true },
-  password: { type: String, required: true, minlength: 6 },
+  phone: { type: String},
+  // password: { type: String,  minlength: 6 },
   
   // Profile Information
   profilePhoto: { type: String },
@@ -24,15 +24,27 @@ const userSchema = new mongoose.Schema({
       longitude: Number
     }
   },
+  referralCode: {
+    type: String,
+    unique: true
+  },
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  referralEarnings: {
+    type: Number,
+    default: 0
+  },
   
   // Account Status
   isVerified: { type: Boolean, default: false },
   isActive: { type: Boolean, default: true },
-  role: { type: String, enum: ['user', 'admin', 'practitioner'], default: 'user' },
+  role: { type: String, enum: ['user', 'practitioner'], default: 'user' },
   
   // Verification
   emailVerificationToken: String,
-  emailVerificationExpires: Date,
+  emailVerificationExpires: Date, 
   phoneVerificationCode: String,
   phoneVerificationExpires: Date,
   resetPasswordToken: String,
