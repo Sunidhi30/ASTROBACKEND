@@ -1,11 +1,18 @@
 // routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { check } = require('express-validator');
 const bcrypt = require('bcryptjs');
+const { auth } = require('../middlewares/auth');
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
+require('dotenv').config(); 
 
 // Generate referral code
 const generateReferralCode = () => uuidv4().substring(0, 8).toUpperCase();
@@ -71,6 +78,8 @@ router.post('/register',
   });
 
   await newUser.save();
+  console.log('Saved user in DB:', await User.findById(newUser._id).select('+password'));
+
 
   // Generate token
   const token = jwt.sign(
@@ -126,7 +135,9 @@ router.post('/login', async (req, res) => {
           message: 'Invalid credentials'
         });
       }
-  
+      console.log('Password in DB:', user.password);
+      console.log('Password from request:', password);
+      
       // 3. Verify password exists in user object
       if (!user.password) {
         console.error('User found but password missing:', user.email);
@@ -193,6 +204,102 @@ router.post('/login', async (req, res) => {
         error: error.message
       });
     }
-  });
+});
+// Get authenticated user's profile
+router.get('/profile', auth, async (req, res) => {
+    try {
+      const user = await User.findById(req.user._id)
+
+        .select('-password -emailVerificationToken -resetPasswordToken')
+        .populate('referredBy', 'firstName lastName email')
+        // .populate('savedReports favoriteServices', 'title description');
+      console.log(user)
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+  
+      res.json({
+        success: true,
+        user
+      });
+    } catch (error) {
+      console.error('Get user error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch user details'
+      });
+    }
+});
+// Get user by ID (public profile)
+router.get('/profile/:id',auth, async (req, res) => {
+    try {
+      const user = await User.findById(req.user._id)
+        .select('firstName lastName profilePhoto role')
+        // .where('preferences.privacySettings.profileVisibility').equals('public');
+      console.log("users is " ,req.params.id)
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found or profile is private'
+        });
+      }
+  
+      res.json({
+        success: true,
+        user
+      });
+    } catch (error) {
+      console.error('Get public profile error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch user profile'
+      });
+    }
+});
+
+// Upload profile image
+router.put('/upload-profile-image', auth, upload.single('profileImage'), async (req, res) => {
+  try {
+    // Check if a file is uploaded
+    if (!req.file) {
+      return res.status(400).json({ message: 'No image file uploaded' });
+    }
+
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload_stream(
+      { folder: 'user_profiles' },
+      async (error, result) => {
+        if (error) {
+          console.error('Cloudinary Error:', error);
+          return res.status(500).json({ message: 'Image upload failed', error });
+        }
+
+        // Update user in DB
+        const user = await User.findByIdAndUpdate(
+          req.user.userId,
+          { profilePhoto: result.secure_url },
+          { new: true }
+        ).select('-password');
+
+        if (!user) {
+          return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.status(200).json({ message: 'Profile image updated successfully', user });
+      }
+    );
+
+    // Pipe the image buffer into Cloudinary stream
+    result.end(req.file.buffer);
+
+  } catch (err) {
+    console.error('Upload Profile Error:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 
 module.exports = router;
