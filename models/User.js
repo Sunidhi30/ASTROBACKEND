@@ -10,6 +10,8 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true },
   phone: { type: String},
   // password: { type: String,  minlength: 6 },
+  password: { type: String, required: true, select: false }, // Add select: false to prevent accidental exposure
+
   
   // Profile Information
   profilePhoto: { type: String },

@@ -3,10 +3,14 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const db = require('./utils/db')
 const app = express();
+const bodyParser = require('body-parser');
 const adminRoutes = require('./routes/Admin');
-const userRoutes = require("./routes/auth");
+const userRoutes = require("./routes/User");
 const PORT = process.env.PORT || 9000;
-require('dotenv').config(); // 👈 FIRST LINE!
+// Add these lines before your routes
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+require('dotenv').config(); 
 app.use(express.json());
 app.use(cors({
   origin: '*',
@@ -14,7 +18,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
-require('dotenv').config()
 db();
 db().then(function (db) {
   console.log(`Db connnected`)
