@@ -10,12 +10,16 @@ const { check } = require('express-validator');
 const bcrypt = require('bcryptjs');
 const { auth } = require('../middlewares/auth');
 const storage = multer.memoryStorage();
+const getZodiacSign = require('../utils/zodiac');
 const upload = multer({ storage });
+const cloudinary = require('../utils/cloudinary'); // assuming this is your cloudinary setup
 
 require('dotenv').config(); 
 
 // Generate referral code
 const generateReferralCode = () => uuidv4().substring(0, 8).toUpperCase();
+
+
 
 router.post('/register', 
     // [
@@ -261,43 +265,169 @@ router.get('/profile/:id',auth, async (req, res) => {
 });
 
 // Upload profile image
-router.put('/upload-profile-image', auth, upload.single('profileImage'), async (req, res) => {
+// router.put('/upload-profile-image', auth, upload.single('profileImage'), async (req, res) => {
+//   try {
+//     // Check if a file is uploaded
+//     if (!req.file) {
+//       return res.status(400).json({ message: 'No image file uploaded' });
+//     }
+
+//     // Upload to Cloudinary
+//     const result = await cloudinary.uploader.upload_stream(
+//       { folder: 'user_profiles' },
+//       async (error, result) => {
+//         if (error) {
+//           console.error('Cloudinary Error:', error);
+//           return res.status(500).json({ message: 'Image upload failed', error });
+//         }
+
+//         // Update user in DB
+//         const user = await User.findByIdAndUpdate(
+//           req.user._id,
+//           { profilePhoto: result.secure_url },
+//           { new: true }
+//         ).select('-password');
+
+//         if (!user) {
+//           return res.status(404).json({ message: 'User not found' });
+//         }
+
+//         res.status(200).json({ message: 'Profile image updated successfully', user });
+//       }
+//     );
+
+//     // Pipe the image buffer into Cloudinary stream
+//     result.end(req.file.buffer);
+
+//   } catch (err) {
+//     console.error('Upload Profile Error:', err);
+//     res.status(500).json({ message: 'Server error', error: err.message });
+//   }
+// });
+//upload profile image 
+router.put('/update-profile', auth, upload.single('profileImage'), async (req, res) => {
   try {
-    // Check if a file is uploaded
-    if (!req.file) {
-      return res.status(400).json({ message: 'No image file uploaded' });
+    const updates = {};
+    const {
+      firstName,
+      lastName,
+      email,
+      phone,
+      dateOfBirth,
+      timeOfBirth,
+      password,
+      preferences,
+      placeOfBirth
+    } = req.body;
+
+    // 🔐 Handle optional password update
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 12);
+      updates.password = hashedPassword;
     }
 
-    // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload_stream(
-      { folder: 'user_profiles' },
-      async (error, result) => {
-        if (error) {
-          console.error('Cloudinary Error:', error);
-          return res.status(500).json({ message: 'Image upload failed', error });
-        }
+    // 📝 Update basic info
+    if (firstName) updates.firstName = firstName;
+    if (lastName) updates.lastName = lastName;
+    if (email) updates.email = email;
+    if (phone) updates.phone = phone;
+    if (dateOfBirth) updates.dateOfBirth = new Date(dateOfBirth);
+    if (timeOfBirth) updates.timeOfBirth = timeOfBirth;
 
-        // Update user in DB
-        const user = await User.findByIdAndUpdate(
-          req.user.userId,
-          { profilePhoto: result.secure_url },
-          { new: true }
-        ).select('-password');
+    // 🗺️ Nested location
+    if (placeOfBirth) {
+      updates.placeOfBirth = JSON.parse(placeOfBirth); // if sent as stringified JSON
+    }
 
-        if (!user) {
-          return res.status(404).json({ message: 'User not found' });
-        }
+    // ⚙️ Preferences
+    if (preferences) {
+      updates.preferences = JSON.parse(preferences); // stringified JSON if sent from frontend
+    }
 
-        res.status(200).json({ message: 'Profile image updated successfully', user });
-      }
-    );
+    // 🖼️ If file is uploaded, upload image to Cloudinary
+    if (req.file) {
+      const result = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: 'user_profiles' },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+          }
+        );
+        stream.end(req.file.buffer);
+      });
 
-    // Pipe the image buffer into Cloudinary stream
-    result.end(req.file.buffer);
+      updates.profilePhoto = result.secure_url;
+    }
 
+    // 🛠️ Update user
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      updates,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.status(200).json({
+      message: 'Profile updated successfully',
+      user: updatedUser
+    });
+
+  } catch (error) {
+    console.error('Update Profile Error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// POST /api/calculators/zodiac
+router.get('/zodiac', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id); // from auth middleware
+    if (!user || !user.dateOfBirth) {
+      return res.status(400).json({ message: 'Birth date not found in profile' });
+    }
+
+    const zodiac = getZodiacSign(user.dateOfBirth);
+    return res.json({ zodiac });
   } catch (err) {
-    console.error('Upload Profile Error:', err);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('Error calculating zodiac:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+// GET /users?page=1&limit=10
+router.get("/users", async (req, res) => {
+  try {
+    // Pagination params
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // Optional sorting
+    const sort = { createdAt: -1 }; // Newest first
+
+    // Total number of users
+    const totalItems = await User.countDocuments();
+
+    // Fetch paginated users
+    const users = await User.find()
+      .select("-password") // Don't send password
+      .skip(skip)
+      .limit(limit)
+      .sort(sort);
+
+    // Response
+    res.json({
+      items: users,
+      totalItems,
+      totalPages: Math.ceil(totalItems / limit),
+      currentPage: page
+    });
+  } catch (error) {
+    console.error("Error fetching users:", error);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
